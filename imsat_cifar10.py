@@ -119,7 +119,7 @@ def CNN(x):
         with tf.variable_scope('layer3'):
             # [n,8,8,128] -> [n,4,4,256] ([n,4x4x256])
             padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
-            w = tf.get_variable(name='w3',shape=[4,4,64,256], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
+            w = tf.get_variable(name='w3',shape=[4,4,128,256], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
             b = tf.get_variable(name='b3',shape=[256], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
             out = tf.nn.leaky_relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b), 0.2)
             out = tf.reshape(out, [-1,4*4*256])
@@ -169,14 +169,14 @@ with tf.name_scope('Model'):
     with tf.name_scope('Inputs'):
         # load inputs
         # for train
-        train_x = tf.placeholder(shape=[a.batch_size,32,32,3], dtype=tf.float32, name='train_x')
+        train_x_vec = tf.placeholder(shape=[a.batch_size,32,32,3], dtype=tf.float32, name='train_x')
         train_y = tf.placeholder(shape=[a.batch_size,10], dtype=tf.float32, name='train_y')
         # for validation
-        val_x = tf.placeholder(shape=[None,32,32,3], dtype=tf.float32, name='val_x')
+        val_x_vec = tf.placeholder(shape=[None,32,32,3], dtype=tf.float32, name='val_x')
         val_y = tf.placeholder(shape=[None,10], dtype=tf.float32, name='val_y')
         # preprocess
-        train_x = preprocess(train_x)
-        val_x = preprocess(val_x)
+        train_x = preprocess(train_x_vec)
+        val_x = preprocess(val_x_vec)
     
     with tf.name_scope('Generate_perturbation'):
         # generate perturbation
@@ -291,8 +291,8 @@ with tf.Session(config=config) as sess:
                 test_batch_idx = np.random.choice(len(x_test_cifar),a.batch_size,replace=False)
                 x_train_bch, y_train_bch = x_train_cifar[train_batch_idx]/255., y_train_cifar[train_batch_idx]
                 x_test_bch, y_test_bch = x_test_cifar[test_batch_idx]/255., y_test_cifar[test_batch_idx]
-                train_dict = {train_x:x_train_bch, train_y:y_train_bch}
-                test_dict = {train_x:x_train_bch, train_y:y_train_bch, val_x:x_test_bch, val_y:y_test_bch}
+                train_dict = {train_x_vec:x_train_bch, train_y:y_train_bch}
+                test_dict = {train_x_vec:x_train_bch, train_y:y_train_bch, val_x_vec:x_test_bch, val_y:y_test_bch}
                 # train operation
                 sess.run(train_op, feed_dict=train_dict)
                 if step % a.print_loss_freq == 0:
