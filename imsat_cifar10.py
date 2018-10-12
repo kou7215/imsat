@@ -116,18 +116,24 @@ def CNN(x):
             w = tf.get_variable(name='w2',shape=[4,4,64,128], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
             b = tf.get_variable(name='b2',shape=[128], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
             out = tf.nn.leaky_relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b), 0.2)
-            out = tf.reshape(out, [-1,8*8*128])
         with tf.variable_scope('layer3'):
+            # [n,8,8,128] -> [n,4,4,256] ([n,4x4x256])
+            padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
+            w = tf.get_variable(name='w3',shape=[4,4,64,256], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
+            b = tf.get_variable(name='b3',shape=[256], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+            out = tf.nn.leaky_relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b), 0.2)
+            out = tf.reshape(out, [-1,4*4*256])
+        with tf.variable_scope('layer4'):
             # [n,8*8*128] -> [n,1024]
-            w = tf.get_variable(name='w3',shape=[8*8*128,1024], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b3',shape=[1024], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+            w = tf.get_variable(name='w4',shape=[4*4*256,1024], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
+            b = tf.get_variable(name='b4',shape=[1024], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
             out = tf.nn.leaky_relu(batchnorm(tf.matmul(out, w) + b), 0.2)
             # dropout
             out = tf.nn.dropout(out, dropout_rate)
-        with tf.variable_scope('layer4'):
+        with tf.variable_scope('layer5'):
             # [n,1024] -> [n,10]
-            w = tf.get_variable(name='w4',shape=[1024,10], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b4',shape=[10], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+            w = tf.get_variable(name='w5',shape=[1024,10], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
+            b = tf.get_variable(name='b5',shape=[10], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
             out = tf.nn.softmax(batchnorm(tf.matmul(out, w) + b))
             return out
 
