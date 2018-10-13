@@ -158,11 +158,9 @@ def Get_VAT_loss(x,r):
 def Entropy(p):
     with tf.name_scope('Entropy'):
         if len(p.get_shape()) == 2:
-            return -tf.reduce_mean(p * tf.log(p + 1e-14), axis=1)
-        elif len(p.get_shape()) == 1:
-            return -tf.reduce_sum(p * tf.log(p + 1e-14))
+            return -tf.reduce_sum(p * tf.log(p + 1e-14),axis=1) #[n,c] -> [n]
         else:
-            raise NotImplementedError
+            return -tf.reduce_sum(p * tf.log(p + 1e-14))
 
 # ----------------- Define Model -----------------
 with tf.name_scope('Model'):
@@ -195,12 +193,12 @@ with tf.name_scope('loss'):
         with tf.name_scope('marginal_entropy_loss'):
             # H(Y) = -Σ p(y) * log[p(y)]
             #      = -Σ[1/N * Σ p(y|x)] * log[1/N * Σp(y|x)]
-            h_y = tf.reduce_mean(train_x_out, axis=0)   # [n,c] -> [c]
-            marginal_entropy_loss = Entropy(h_y)   # [n] -> []
+            p_y = tf.reduce_mean(train_x_out, axis=0)   # [n,c] -> [c]
+            marginal_entropy_loss = Entropy(p_y)   # [n] -> []
 
         with tf.name_scope('conditional_entropy_loss'):
             # H(Y|X) = 1/N*Σ [Σ -p(y|x) * log[p(y|x)] ]
-            c_entropy_loss = tf.reduce_mean(Entropy(train_x_out))   # [n,c] -> [n,] -> []
+            c_entropy_loss = tf.reduce_mean(Entropy(train_x_out), axis=0)   # [n,c] -> [n,] -> []
 
         matual_information_loss = marginal_entropy_loss - a.mu*c_entropy_loss
         
@@ -315,18 +313,18 @@ with tf.Session(config=config) as sess:
         print('Loaded model from {}'.format(a.load_model_path))
         # load CIFAR10 for test
         (x_train_cifar, y_train_cifar), (x_test_cifar, y_test_cifar) = load_data()
-        x_test = x_test_cifar[:1000]/255.
-        y_test = np.identity(10)[y_test_cifar[:,0]][:1000]
-        test_dict = {val_x_vec:x_test_cifar, val_y:y_test_cifar}
+        x_test = x_test_cifar[:2000]/255.
+        y_test = np.identity(10)[y_test_cifar[:,0]][:2000]
+        test_dict = {val_x_vec:x_test, val_y:y_test}
         cluster = np.argmax(sess.run(val_x_out,feed_dict=test_dict),axis=1)
         CLUSTER_SHOW_NUM = 16
         clustering_results_tmp = np.full((int(32*a.y_dim),int(32*CLUSTER_SHOW_NUM),3), 255, dtype=np.uint8)
         cluster_count = np.zeros([a.y_dim],dtype=np.int32)
-        for i in range(len(x_test_image)):
+        for i in range(len(x_test)):
             if cluster_count.all() > CLUSTER_SHOW_NUM:
                 break
-            img = np.uint8(x_test_image[i]*255)
-            img = cv2.copyMakeBorder(img,2,2,2,2,cv2.BORDER_CONSTANT,value=(255,255,255))
+            img = np.uint8(x_test[i]*255)
+            img = cv2.copyMakeBorder(img,1,1,1,1,cv2.BORDER_CONSTANT,value=(0,0,0))
             img = cv2.resize(img, (32,32))
             clus = cluster[i]
             if cluster_count[clus] >= CLUSTER_SHOW_NUM:
