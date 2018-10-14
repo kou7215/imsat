@@ -9,7 +9,7 @@ from munkres import Munkres, print_matrix
 
 parser = argparse.ArgumentParser()
 # data args
-parser.add_argument("--input_file_path", default='/home/konosuke-a/kaggle_datasets/stl10/unlabeled_images', help="path for input data directory")
+parser.add_argument("--input_file_path", default='/home/konosuke-a/kaggle_datasets/stl10/train_images', help="path for input data directory")
 parser.add_argument("--load_model", default=False, type=bool, help="train is False, test is True")
 parser.add_argument("--load_model_path", default='./stl10_logs', help="path for checkpoint")
 parser.add_argument("--save_dir", default='./stl10_logs', help="path for save the model and logs")
@@ -110,38 +110,39 @@ def CNN(x):
             padded = tf.pad(x, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
             w = tf.get_variable(name='w1',shape=[4,4,3,64], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
             b = tf.get_variable(name='b1',shape=[64], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.leaky_relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b), 0.2)
+            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
         with tf.variable_scope('layer2'):
             # [n,48,48,64] -> [n,24,24,128]
             padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
             w = tf.get_variable(name='w2',shape=[4,4,64,128], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
             b = tf.get_variable(name='b2',shape=[128], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.leaky_relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b), 0.2)
+            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
         with tf.variable_scope('layer3'):
             # [n,24,24,128] -> [n,12,12,256]                           
             padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
             w = tf.get_variable(name='w3',shape=[4,4,128,256], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
             b = tf.get_variable(name='b3',shape=[256], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.leaky_relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b), 0.2)
+            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
         with tf.variable_scope('layer4'):
             # [n,12,12,256] -> [n,6,6,512]
             padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
             w = tf.get_variable(name='w4',shape=[4,4,256,512], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
             b = tf.get_variable(name='b4',shape=[512], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.leaky_relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b), 0.2)
-            out = tf.reshape(out, [-1,6*6*512])
+            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
+            #  [n,6,6,512] -> [n,512]
+            out = tf.reduce_mean(out, axis=[1,2], name='global_pooling')
             # dropout
             out = tf.nn.dropout(out, dropout_rate)
         with tf.variable_scope('layer5'):
-            # [n,8*8*128] -> [n,1024]
-            w = tf.get_variable(name='w5',shape=[6*6*512,1024], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b5',shape=[1024], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.leaky_relu(batchnorm(tf.matmul(out, w) + b), 0.2)
+            # [n,512] -> [n,256]
+            w = tf.get_variable(name='w5',shape=[512,256], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
+            b = tf.get_variable(name='b5',shape=[256], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+            out = tf.nn.relu(batchnorm(tf.matmul(out, w) + b))
             # dropout
             out = tf.nn.dropout(out, dropout_rate)
         with tf.variable_scope('layer6'):
-            # [n,1024] -> [n,10]
-            w = tf.get_variable(name='w6',shape=[1024,10], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
+            # [n,256] -> [n,10]
+            w = tf.get_variable(name='w6',shape=[256,10], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
             b = tf.get_variable(name='b6',shape=[10], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
             out = tf.nn.softmax(batchnorm(tf.matmul(out, w) + b))
             return out
@@ -316,7 +317,7 @@ with tf.Session(config=config) as sess:
         tf.train.start_queue_runners(sess=sess)
         x_template = np.array([])
         clus_template = np.array([])
-        for i in range(10):
+        for i in range(100):
             x_bch, cluster = sess.run((x_batch, x_batch_out))
             x_template = np.reshape(np.append(x_template, x_bch), [-1,96,96,3])
             clus_template = np.reshape(np.append(clus_template, cluster), [-1,10])
@@ -326,6 +327,7 @@ with tf.Session(config=config) as sess:
 
         # load CIFAR10 for test
         cluster = np.argmax(clus_template,axis=1)
+        print(cluster)
         CLUSTER_SHOW_NUM = 16
         clustering_results_tmp = np.full((int(96*a.y_dim),int(96*CLUSTER_SHOW_NUM),3), 255, dtype=np.uint8)
         cluster_count = np.zeros([a.y_dim],dtype=np.int32)
