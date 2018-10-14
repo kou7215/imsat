@@ -5,7 +5,7 @@ import glob
 import os
 import argparse
 import cv2
-from munkres import Munkres, print_matrix
+import tensorflow_hub as hub
 
 parser = argparse.ArgumentParser()
 # data args
@@ -51,6 +51,18 @@ def deprocess(image):
         # [-1, 1] => [0, 1]
         return (image + 1) / 2
 
+def He_initializer(y):
+    with tf.name_scope('He_initializer'):
+        # Initializer for ReLU
+        stddev = lambda in_ch: np.sqrt(2/in_ch)
+        if len(y.get_shape()) == 2:
+            _, in_ch = [int(i) for i in y.get_shape()]
+            return tf.random_normal_initializer(0.0, stddev(in_ch))
+        elif len(y.get_shape()) == 4:
+            _,h,w,ch = [int(i) for i in y.get_shape()]
+            in_ch = h*w*ch
+            return tf.random_normal_initializer(0.0, stddev(in_ch))
+
 def batchnorm(input):
     with tf.variable_scope('batchnorm',reuse=tf.AUTO_REUSE):
         input = tf.identity(input)
@@ -84,6 +96,7 @@ with tf.name_scope('LoadImage'):
     path_batch, x_batch = tf.train.batch([paths, x_input],
                                           batch_size=a.batch_size,
                                           allow_smaller_final_batch=a.load_model==True)
+    x_batch = tf.image.resize_images(x_batch,[224,224])
 
 def Get_normalized_vector(d):
     with tf.name_scope('get_normalized_vec'):
@@ -98,53 +111,25 @@ def KL_divergence(p, q):
     return kld
     
 
+module = hub.Module("https://tfhub.dev/google/imagenet/resnet_v2_50/feature_vector/1", trainable=False)
 def CNN(x):
-    stride = 2
+    x = module(x)
     # dropout_rate
     dropout_rate = 1.0
     if a.load_model is not True:
-        dropout_rate = 0.5
-    with tf.variable_scope('CNN',reuse=tf.AUTO_REUSE):
+        dropout_rate = 0.8
+    with tf.variable_scope('Dense',reuse=tf.AUTO_REUSE):
         with tf.variable_scope('layer1'):
-            # [n,96,96,3] -> [n,48,48,64]
-            padded = tf.pad(x, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
-            w = tf.get_variable(name='w1',shape=[4,4,3,64], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b1',shape=[64], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
+            # [n,2048] -> [n,512]
+            w = tf.get_variable(name='w1',shape=[2048,512], dtype=tf.float32, initializer=He_initializer(x))
+            b = tf.get_variable(name='b1',shape=[512], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+            out = tf.nn.leaky_relu(batchnorm(tf.matmul(x,w) + b))
         with tf.variable_scope('layer2'):
-            # [n,48,48,64] -> [n,24,24,128]
-            padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
-            w = tf.get_variable(name='w2',shape=[4,4,64,128], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b2',shape=[128], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
-        with tf.variable_scope('layer3'):
-            # [n,24,24,128] -> [n,12,12,256]                           
-            padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
-            w = tf.get_variable(name='w3',shape=[4,4,128,256], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b3',shape=[256], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
-        with tf.variable_scope('layer4'):
-            # [n,12,12,256] -> [n,6,6,512]
-            padded = tf.pad(out, [[0, 0], [1, 1], [1, 1], [0, 0]], mode="CONSTANT")
-            w = tf.get_variable(name='w4',shape=[4,4,256,512], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b4',shape=[512], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.relu(batchnorm(tf.nn.conv2d(padded, w, [1,stride,stride,1], padding='VALID') + b))
-            #  [n,6,6,512] -> [n,512]
-            out = tf.reduce_mean(out, axis=[1,2], name='global_pooling')
-            # dropout
+            # [n,512] -> [n,10]
             out = tf.nn.dropout(out, dropout_rate)
-        with tf.variable_scope('layer5'):
-            # [n,512] -> [n,256]
-            w = tf.get_variable(name='w5',shape=[512,256], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b5',shape=[256], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.relu(batchnorm(tf.matmul(out, w) + b))
-            # dropout
-            out = tf.nn.dropout(out, dropout_rate)
-        with tf.variable_scope('layer6'):
-            # [n,256] -> [n,10]
-            w = tf.get_variable(name='w6',shape=[256,10], dtype=tf.float32, initializer=tf.random_normal_initializer(0,0.02))
-            b = tf.get_variable(name='b6',shape=[10], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-            out = tf.nn.softmax(batchnorm(tf.matmul(out, w) + b))
+            w = tf.get_variable(name='w2',shape=[512,10], dtype=tf.float32, initializer=He_initializer(out))
+            b = tf.get_variable(name='b2',shape=[10], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+            out = tf.nn.softmax(batchnorm(tf.matmul(out,w) + b))
             return out
 
 def Generate_perturbation(x):
@@ -162,8 +147,9 @@ def Transform(x):
     with tf.name_scope('Transform'):
         with tf.name_scope('random_cropping'):
             # random cropping params
-            CROP_SIZE = 96
-            SCALE_SIZE = 116
+            _,h,w,ch = x.get_shape()
+            CROP_SIZE = int(h)
+            SCALE_SIZE = int(h+20)
             # random cropping
             crop_offset = tf.cast(tf.floor(tf.random_uniform([2], 0, SCALE_SIZE - CROP_SIZE + 1, seed=seed)), dtype=tf.int32)
             x = tf.image.resize_images(x, [SCALE_SIZE, SCALE_SIZE], method=tf.image.ResizeMethod.AREA)
@@ -172,11 +158,10 @@ def Transform(x):
             x = tf.image.random_flip_left_right(x)
 
         with tf.name_scope('random_brightness'):
-            x = tf.image.random_brightness(x, max_delta=63)
+            x = tf.image.random_brightness(x, max_delta=0.2)
 
         with tf.name_scope('random_contrast'):
             x = tf.image.random_contrast(x,lower=0.2,upper=1.8)
-
             return x
 
 def Get_VAT_loss(x,r):
