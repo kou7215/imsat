@@ -1,27 +1,29 @@
 import tensorflow as tf
-from tensorflow.keras.datasets.cifar10 import load_data
 import numpy as np
 import glob
 import os
 import argparse
 import cv2
 import tensorflow_hub as hub
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser()
 # data args
 parser.add_argument("--input_file_path", default='/home/konosuke-a/kaggle_datasets/stl10/train_images', help="path for input data directory")
 parser.add_argument("--load_model", default=False, type=bool, help="train is False, test is True")
-parser.add_argument("--load_model_path", default='./stl10_resnet_logs', help="path for checkpoint")
-parser.add_argument("--save_dir", default='./stl10_resnet_logs', help="path for save the model and logs")
+parser.add_argument("--load_model_path", default='./stl10_resnet_logs_scale', help="path for checkpoint")
+parser.add_argument("--save_dir", default='./stl10_resnet_logs_scale', help="path for save the model and logs")
 # train conditions args
 parser.add_argument("--batch_size", type=int, default=32, help="batch size")
 parser.add_argument("--y_dim", type=int, default=10, help="cluster size")
 parser.add_argument("--Ip", type=int, default=1, help="Power iteration num")
-parser.add_argument("--eps", type=float, default=8.0, help="hyper parameter scale of returned d")   # 0.25 * sigma(x)?
+parser.add_argument("--alpha", type=float, default=0.25, help="hyper parameter scale of returned d")   # 0.25 * sigma(x)?
 parser.add_argument("--xi", type=float, default=10, help="hyper parameter scale of initialised d")
 parser.add_argument("--lam", type=float, default=0.1, help="trade-off parameter for mutual information and smooth regularization")
 parser.add_argument("--mu", type=float, default=4.0, help="trade-off parameter for entropy minimization and entropy maximization")
-parser.add_argument("--epoch", type=int, default=100, help="epoch")
+parser.add_argument("--epoch", type=int, default=50, help="epoch")
 parser.add_argument("--print_loss_freq", type=int, default=500, help="print loss EPOCH frequency")
 parser.add_argument("--gpu_config", default=-1, help="0: gpu0, 1: gpu1, -1: both gpu")
 a = parser.parse_args()
@@ -134,6 +136,11 @@ def CNN(x):
             out = tf.nn.softmax(batchnorm(tf.matmul(out,w) + b))
             return out
 
+def Deviation(x):
+    mean = tf.reduce_mean(x)
+    scale = tf.square(x - mean) 
+    return scale
+
 def Generate_perturbation(x):
     d = tf.random_normal(shape=tf.shape(x))
     for i in range(a.Ip):
@@ -143,7 +150,7 @@ def Generate_perturbation(x):
         d_kl = KL_divergence(p,q)
         grad = tf.gradients(d_kl, [d], aggregation_method=2)[0] # d(d_kl)/d(d)
         d = tf.stop_gradient(grad)
-    return a.eps * Get_normalized_vector(d)
+    return a.alpha* Deviation(x) * Get_normalized_vector(d)
    
 def Transform(x):
     with tf.name_scope('Transform'):
@@ -305,7 +312,8 @@ with tf.Session(config=config) as sess:
         tf.train.start_queue_runners(sess=sess)
         x_template = np.array([])
         clus_template = np.array([])
-        for i in range(100):
+        n_range = int(1500/a.batch_size)
+        for i in range(n_range):
             x_bch, cluster = sess.run((x_batch, x_batch_out))
             x_template = np.reshape(np.append(x_template, x_bch), [-1,224,224,3])
             clus_template = np.reshape(np.append(clus_template, cluster), [-1,10])
